@@ -2,9 +2,83 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BioTreat 异常处置</title><link rel="stylesheet" href="/assets/app.css"></head>
 <body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a aria-current="page" href="/alarms">异常处置</a></nav></header>
-<main><div class="page-head"><div><h1>工艺告警</h1><div class="muted">当前异常、确认状态和处理线隔离信息</div></div><div class="status"><span class="dot"></span><span id="health">checking</span></div></div>
-<div class="grid"><section class="panel wide"><h2>告警队列</h2><table><thead><tr><th>级别</th><th>处理线</th><th>内容</th><th>状态</th><th></th></tr></thead><tbody id="alarms"></tbody></table></section><section class="panel"><h2>污泥界面采样</h2><form id="blanket"><label>处理线<select name="line"><option>line-1</option><option>line-2</option><option>line-3</option></select></label><label>界面高度 m<input name="level" type="number" step="0.1" value="3.1"></label><button>更新沉降状态</button></form></section><section class="panel wide"><h2>处置结果</h2><pre id="output">等待处置</pre></section></div></main>
+<main><div class="page-head"><div><h1>工艺告警</h1><div class="muted">同一处理线、报警类型与设备的重复触发归并为一段故障，保留完整报警时间线</div></div><div class="status"><span class="dot"></span><span id="health">checking</span></div></div>
+<div class="grid"><section class="panel wide"><h2>故障段队列
+<span class="muted">
+<a href="#" data-status="">全部</a> ·
+<a href="#" data-status="active">活跃</a> ·
+<a href="#" data-status="acknowledged">已确认</a> ·
+<a href="#" data-status="recovered">已恢复</a>
+（当前：<b id="filter-name">全部</b>）
+</span></h2>
+<table><thead><tr><th>级别</th><th>处理线</th><th>设备</th><th>类型</th><th>首次触发</th><th>再次触发</th><th>确认人</th><th>状态</th></tr></thead><tbody id="alarms"></tbody></table></section>
+<section class="panel"><h2>污泥界面采样</h2><form id="blanket"><label>处理线<select name="line"><option>line-1</option><option>line-2</option><option>line-3</option></select></label><label>界面高度 m<input name="level" type="number" step="0.1" value="3.1"></label><button>更新沉降状态</button></form></section>
+<section class="panel"><h2>故障处置</h2><form id="action">
+<label>故障段 ID<input name="id" readonly placeholder="在左侧列表点选一条故障"></label>
+<label>确认人<input name="actor" placeholder="工号或姓名"></label>
+<label>处置说明<textarea name="resolution" rows="3" placeholder="现场检查与处置措施"></textarea></label>
+<button id="ack-btn" type="submit">确认故障</button>
+<button id="recover-btn" class="danger" type="button">标记恢复</button>
+</form><div class="muted">重复确认或重复恢复会被安全忽略，不会覆盖首次确认人/恢复时间。</div></section>
+<section class="panel wide"><h2>原始报警时间线</h2><pre id="timeline">点选一条故障查看完整时间线</pre></section>
+<section class="panel wide"><h2>处置结果</h2><pre id="output">等待处置</pre></section></div></main>
 <script src="/assets/common.js"></script><script>
-async function load(){const d=await request('/api/alarms');document.querySelector('#alarms').innerHTML=d.alarms.map(a=>`<tr><td>${a.severity}</td><td>${a.line_id}</td><td>${a.message}</td><td>${a.acknowledged?'已确认':'待确认'}</td><td><button data-id="${a.id}">确认</button></td></tr>`).join('');document.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{try{show(await request(`/api/alarms/${b.dataset.id}/ack`,{method:'POST',body:'{}'}));load()}catch(err){showError(err)}})}
-document.querySelector('#blanket').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);try{show(await request(`/api/settling/${f.get('line')}/blanket`,{method:'POST',body:JSON.stringify({level:Number(f.get('level'))})}));load()}catch(err){showError(err)}});load().catch(showError);
+let currentFilter = "";
+let selectedId = null;
+
+function fmt(t){ return t ? new Date(t).toLocaleString("zh-CN", {hour12:false}) : "—"; }
+function statusName(s){ return {active:"活跃", acknowledged:"已确认", recovered:"已恢复"}[s] || s; }
+function escapeHtml(v){ return String(v ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function load(){
+  const qs = currentFilter ? `?status=${currentFilter}` : "";
+  const d = await request("/api/alarms" + qs);
+  document.querySelector("#alarms").innerHTML = d.incidents.map(a => {
+    const repeat = a.raise_count > 1 ? `${a.raise_count - 1} 次，最近 ${fmt(a.last_raised_at)}` : "无";
+    return `<tr data-id="${a.id}" class="${selectedId===a.id?'selected':''}" style="cursor:pointer">
+<td>${escapeHtml(a.severity)}</td><td>${escapeHtml(a.line_id)}</td><td>${escapeHtml(a.device_id)}</td><td>${escapeHtml(a.code)}</td>
+<td>${fmt(a.first_raised_at)}</td><td>${repeat}</td><td>${escapeHtml(a.acknowledged_by) || "—"}</td><td>${statusName(a.status)}</td></tr>`;
+  }).join("");
+  document.querySelectorAll("#alarms tr").forEach(tr => tr.onclick = () => select(tr.dataset.id));
+}
+
+async function select(id){
+  selectedId = id;
+  document.querySelector('#action input[name=id]').value = id;
+  await load();
+  try{
+    const detail = await request(`/api/alarms/${id}`);
+    const rows = detail.timeline.map(e => {
+      const label = {raised:"首次触发", repeated:"再次触发", acknowledged:"确认", note:"补充说明", recovered:"恢复"}[e.type] || e.type;
+      const who = e.actor ? `，确认人 ${e.actor}` : "";
+      const note = e.note ? `，说明：${e.note}` : "";
+      return `${fmt(e.at)}  ${label}${who}${note}`;
+    });
+    const raw = detail.occurrences.map((o, i) => `  #${i+1} ${fmt(o.raised_at)}  ${o.message}`).join("\n");
+    document.querySelector("#timeline").textContent =
+      `${detail.code} / ${detail.line_id} / ${detail.device_id}（${statusName(detail.status)}，共 ${detail.raise_count} 次触发）\n` +
+      `首次触发 ${fmt(detail.first_raised_at)}，恢复时间 ${fmt(detail.recovered_at)}\n` +
+      `处置说明：${detail.resolution || "（暂无）"}\n\n事件：\n${rows.join("\n")}\n\n原始报警记录：\n${raw}`;
+  }catch(err){ showError(err); }
+}
+
+document.querySelectorAll("[data-status]").forEach(a => a.onclick = async e => {
+  e.preventDefault();
+  currentFilter = a.dataset.status;
+  document.querySelector("#filter-name").textContent = a.textContent;
+  await load();
+});
+
+async function submitAction(path){
+  const f = new FormData(document.querySelector("#action"));
+  if(!f.get("id")){ showError(new Error("请先在列表中点选一条故障")); return; }
+  const body = JSON.stringify({acknowledged_by: f.get("actor"), resolution: f.get("resolution")});
+  try{ show(await request(`/api/alarms/${f.get("id")}/${path}`, {method:"POST", body})); await load(); await select(f.get("id")); }
+  catch(err){ showError(err); }
+}
+document.querySelector("#action").addEventListener("submit", e => { e.preventDefault(); submitAction("ack"); });
+document.querySelector("#recover-btn").onclick = () => submitAction("recover");
+
+document.querySelector('#blanket').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);try{show(await request(`/api/settling/${f.get('line')}/blanket`,{method:'POST',body:JSON.stringify({level:Number(f.get('level'))})}));await load();if(selectedId)await select(selectedId);}catch(err){showError(err)}});
+load().catch(showError);
 </script></body></html>

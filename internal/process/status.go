@@ -91,7 +91,7 @@ func (p *Plant) Status(lineID model.LineID) (LineStatus, error) {
 		Compensations: p.compensations.Pending(),
 		Pumps:         filterPumps(p.pumps.Snapshot(), lineID), Blowers: p.aeration.Blowers(),
 		Valves: p.valves.Snapshot(), Commands: p.devices.All(),
-		AlarmCount: len(p.alarms.Active(lineID)), ObservedAt: p.now().UTC(),
+		AlarmCount: p.alarms.ActiveCount(lineID), ObservedAt: p.now().UTC(),
 	}, nil
 }
 

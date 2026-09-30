@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wyw14/cry-97/internal/aeration"
+	"github.com/wyw14/cry-97/internal/alarm"
 	"github.com/wyw14/cry-97/internal/dosing"
 	"github.com/wyw14/cry-97/internal/model"
 	"github.com/wyw14/cry-97/internal/settling"
@@ -64,8 +65,12 @@ func (p *Plant) AdvanceSettling(lineID model.LineID) (settling.Cycle, error) {
 	return p.cycles.Advance(lineID, p.now())
 }
 
-func (p *Plant) Alarms() []model.Alarm {
-	return p.alarms.All()
+func (p *Plant) Incidents(lineID model.LineID, filter alarm.Filter) []model.Incident {
+	return p.alarms.List(lineID, filter)
+}
+
+func (p *Plant) Incident(id uuid.UUID) (model.Incident, error) {
+	return p.alarms.Get(id)
 }
 
 func (p *Plant) StatusBlowers() []aeration.Blower {
@@ -76,12 +81,12 @@ func (p *Plant) StatusAerationWindows() []aeration.Window {
 	return p.aeration.Windows()
 }
 
-func (p *Plant) AcknowledgeAlarm(id uuid.UUID) (model.Alarm, error) {
-	return p.alarms.Acknowledge(id)
+func (p *Plant) AcknowledgeAlarm(id uuid.UUID, actor, note string) (model.Incident, error) {
+	return p.alarms.Acknowledge(id, actor, note, p.now())
 }
 
-func (p *Plant) RecoverAlarm(id uuid.UUID) (model.Alarm, error) {
-	return p.alarms.Recover(id, p.now())
+func (p *Plant) RecoverAlarm(id uuid.UUID, note string) (model.Incident, error) {
+	return p.alarms.Recover(id, note, p.now())
 }
 
 func (p *Plant) Clock() time.Time {

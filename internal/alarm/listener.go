@@ -28,5 +28,9 @@ func (l *BlanketListener) BlanketChanged(notice settling.BlanketNotice) {
 	}
 	current := l.state.Snapshot()
 	message := fmt.Sprintf("sludge blanket high in %s at %.2f m", current.BasinID, current.BlanketLevel)
-	l.service.Raise(model.NewAlarm(current.LineID, "SETTLING_BLANKET_HIGH", message, model.SeverityWarning, l.now()))
+	raised, err := model.NewAlarm(current.LineID, "SETTLING_BLANKET_HIGH", current.BasinID, message, model.SeverityWarning, l.now())
+	if err != nil {
+		return
+	}
+	l.service.Raise(raised)
 }
